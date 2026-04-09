@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import zipfile
 from pathlib import Path
 
 from kaggle.api.kaggle_api_extended import KaggleApi
 
-from semantic_datasets.base import BaseDownloader, DatasetInfo
+from src.base import BaseDownloader, DatasetInfo
 
 
 class KaggleDownloader(BaseDownloader):
@@ -31,9 +29,7 @@ class KaggleDownloader(BaseDownloader):
         results = self._api.dataset_list(search=query, page=1)
         return [self._to_info(ds) for ds in results[:max_results]]
 
-    def list_datasets(
-        self, max_results: int = 50, **filters
-    ) -> list[DatasetInfo]:
+    def list_datasets(self, max_results: int = 50, **filters) -> list[DatasetInfo]:
         sort_by = filters.pop("sort_by", "hottest")
         file_type = filters.pop("file_type", None)
         tag_ids = filters.pop("tag_ids", None)

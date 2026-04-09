@@ -8,8 +8,8 @@ from pathlib import Path
 import openml
 import pandas as pd
 
-from semantic_datasets.base import BaseDownloader, ColumnSemantic, DatasetInfo
-from semantic_datasets.semantic_parser import parse_attribute_semantics
+from src.base import BaseDownloader, ColumnSemantic, DatasetInfo
+from src.semantic_parser import parse_attribute_semantics
 
 
 class OpenMLDownloader(BaseDownloader):
@@ -23,16 +23,13 @@ class OpenMLDownloader(BaseDownloader):
         datasets = openml.datasets.list_datasets(output_format="dataframe")
         assert isinstance(datasets, pd.DataFrame)
 
-        mask = (
-            datasets["name"].str.contains(query, case=False, na=False)
-            | datasets["description"].str.contains(query, case=False, na=False)
-        )
+        mask = datasets["name"].str.contains(query, case=False, na=False) | datasets[
+            "description"
+        ].str.contains(query, case=False, na=False)
         matched = datasets[mask].head(max_results)
         return [self._row_to_info(row) for _, row in matched.iterrows()]
 
-    def list_datasets(
-        self, max_results: int = 50, **filters
-    ) -> list[DatasetInfo]:
+    def list_datasets(self, max_results: int = 50, **filters) -> list[DatasetInfo]:
         datasets = openml.datasets.list_datasets(output_format="dataframe")
         assert isinstance(datasets, pd.DataFrame)
 
@@ -41,8 +38,7 @@ class OpenMLDownloader(BaseDownloader):
                 datasets = datasets[datasets[key] == value]
 
         return [
-            self._row_to_info(row)
-            for _, row in datasets.head(max_results).iterrows()
+            self._row_to_info(row) for _, row in datasets.head(max_results).iterrows()
         ]
 
     def info(self, dataset_id: str) -> DatasetInfo:
@@ -99,7 +95,9 @@ class OpenMLDownloader(BaseDownloader):
             },
         }
         meta_path = dest / "metadata.json"
-        meta_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+        meta_path.write_text(
+            json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
 
         return dest
 
@@ -116,16 +114,16 @@ class OpenMLDownloader(BaseDownloader):
             api_semantics[feat.name] = ColumnSemantic(
                 column_name=feat.name,
                 data_type=feat.data_type or "",
-                role="target" if feat.name == ds.default_target_attribute else "feature",
+                role="target"
+                if feat.name == ds.default_target_attribute
+                else "feature",
             )
 
         if column_names is None:
             column_names = list(api_semantics.keys())
 
         # 2. Parse description text for semantic names & descriptions
-        desc_semantics = parse_attribute_semantics(
-            ds.description or "", column_names
-        )
+        desc_semantics = parse_attribute_semantics(ds.description or "", column_names)
         desc_map = {cs.column_name: cs for cs in desc_semantics}
 
         # 3. Merge: API provides data_type/role, description parsing provides semantic_name/description

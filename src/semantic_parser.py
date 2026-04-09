@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from semantic_datasets.base import ColumnSemantic
+from src.base import ColumnSemantic
 
 
 def parse_attribute_semantics(
@@ -60,9 +60,7 @@ def _extract_attribute_section(description: str) -> str:
     return ""
 
 
-def _find_column_semantic(
-    column_name: str, text: str
-) -> tuple[str, str]:
+def _find_column_semantic(column_name: str, text: str) -> tuple[str, str]:
     """Find semantic info for a specific column name in the text.
 
     Looks for patterns like:

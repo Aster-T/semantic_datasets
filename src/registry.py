@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterator
 
-from semantic_datasets.base import BaseDownloader, DatasetInfo
+from src.base import BaseDownloader, DatasetInfo
 
 
 class DownloaderRegistry:
@@ -27,8 +27,8 @@ class DownloaderRegistry:
 
     def register_defaults(self) -> None:
         """Register all built-in downloaders."""
-        from semantic_datasets.kaggle_downloader import KaggleDownloader
-        from semantic_datasets.openml_downloader import OpenMLDownloader
+        from src.kaggle_downloader import KaggleDownloader
+        from src.openml_downloader import OpenMLDownloader
 
         self.register(OpenMLDownloader(data_dir=self.data_dir))
         self.register(KaggleDownloader(data_dir=self.data_dir))
@@ -36,9 +36,7 @@ class DownloaderRegistry:
     def get(self, source: str) -> BaseDownloader:
         if source not in self._downloaders:
             available = ", ".join(self._downloaders)
-            raise KeyError(
-                f"Unknown source '{source}'. Available: {available}"
-            )
+            raise KeyError(f"Unknown source '{source}'. Available: {available}")
         return self._downloaders[source]
 
     @property
@@ -80,9 +78,7 @@ class DownloaderRegistry:
             )
         return parts[0], parts[1]
 
-    def _iter_downloaders(
-        self, sources: list[str] | None
-    ) -> Iterator[BaseDownloader]:
+    def _iter_downloaders(self, sources: list[str] | None) -> Iterator[BaseDownloader]:
         if sources is None:
             yield from self._downloaders.values()
         else:
