@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from src.base import ColumnSemantic
+from base import ColumnSemantic
 
 
 def parse_attribute_semantics(

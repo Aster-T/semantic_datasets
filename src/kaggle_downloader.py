@@ -6,7 +6,7 @@ from pathlib import Path
 
 from kaggle.api.kaggle_api_extended import KaggleApi
 
-from src.base import BaseDownloader, DatasetInfo
+from base import BaseDownloader, DatasetInfo
 
 
 class KaggleDownloader(BaseDownloader):

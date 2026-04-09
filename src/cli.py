@@ -8,7 +8,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from src.registry import DownloaderRegistry
+from registry import DownloaderRegistry
 
 console = Console()
 
@@ -21,8 +21,8 @@ def _build_registry(data_dir: str, sources: tuple[str, ...]) -> DownloaderRegist
         registry.register_defaults()
     else:
         # Lazy-import only the requested sources
-        from src.kaggle_downloader import KaggleDownloader
-        from src.openml_downloader import OpenMLDownloader
+        from kaggle_downloader import KaggleDownloader
+        from openml_downloader import OpenMLDownloader
 
         source_map = {
             "openml": lambda: OpenMLDownloader(data_dir=data_dir),

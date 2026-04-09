@@ -8,8 +8,8 @@ from pathlib import Path
 import openml
 import pandas as pd
 
-from src.base import BaseDownloader, ColumnSemantic, DatasetInfo
-from src.semantic_parser import parse_attribute_semantics
+from base import BaseDownloader, ColumnSemantic, DatasetInfo
+from semantic_parser import parse_attribute_semantics
 
 
 class OpenMLDownloader(BaseDownloader):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterator
 
-from src.base import BaseDownloader, DatasetInfo
+from base import BaseDownloader, DatasetInfo
 
 
 class DownloaderRegistry:
@@ -27,8 +27,8 @@ class DownloaderRegistry:
 
     def register_defaults(self) -> None:
         """Register all built-in downloaders."""
-        from src.kaggle_downloader import KaggleDownloader
-        from src.openml_downloader import OpenMLDownloader
+        from kaggle_downloader import KaggleDownloader
+        from openml_downloader import OpenMLDownloader
 
         self.register(OpenMLDownloader(data_dir=self.data_dir))
         self.register(KaggleDownloader(data_dir=self.data_dir))

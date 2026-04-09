@@ -1,4 +1,4 @@
-from src.base import BaseDownloader
-from src.registry import DownloaderRegistry
+from base import BaseDownloader
+from registry import DownloaderRegistry
 
 __all__ = ["BaseDownloader", "DownloaderRegistry"]
