@@ -1,0 +1,21 @@
+[project]
+name = "semantic-datasets"
+version = "0.1.0"
+description = "A framework for downloading datasets from OpenML, Kaggle and more"
+requires-python = ">=3.10"
+dependencies = [
+    "openml>=0.14",
+    "kaggle>=1.6",
+    "pandas>=2.0",
+    "rich>=13.0",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+semantic-datasets = "semantic_datasets.cli:cli"
