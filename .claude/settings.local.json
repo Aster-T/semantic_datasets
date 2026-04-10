@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -lh d:/Projects/semantic_datasets/src/*.py)",
+      "Read(//d/Projects/semantic_datasets/**)"
+    ]
+  }
+}
