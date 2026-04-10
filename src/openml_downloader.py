@@ -8,8 +8,7 @@ from pathlib import Path
 import openml
 import pandas as pd
 
-from base import BaseDownloader, ColumnSemantic, DatasetInfo
-from semantic_parser import parse_attribute_semantics
+from base import BaseDownloader, DatasetInfo
 
 
 class OpenMLDownloader(BaseDownloader):
@@ -45,7 +44,6 @@ class OpenMLDownloader(BaseDownloader):
         ds = openml.datasets.get_dataset(
             int(dataset_id), download_data=False, download_qualities=False
         )
-        column_semantics = self._extract_semantics(ds)
         return DatasetInfo(
             name=ds.name,
             source=self.source_name,
@@ -58,7 +56,6 @@ class OpenMLDownloader(BaseDownloader):
                 "version": ds.version,
                 "default_target": ds.default_target_attribute,
             },
-            column_semantics=column_semantics,
         )
 
     def download(self, dataset_id: str, dest_dir: Path | None = None) -> Path:
@@ -69,14 +66,11 @@ class OpenMLDownloader(BaseDownloader):
         )
         df, *_ = ds.get_data()
 
-        # --- Extract and merge semantic info ---
-        column_semantics = self._extract_semantics(ds, list(df.columns))
-
         # Save data as parquet
         out_path = dest / f"{ds.name}.parquet"
         df.to_parquet(out_path, index=False)
 
-        # Save metadata with column semantics
+        # Save metadata with description
         metadata = {
             "name": ds.name,
             "source": "openml",
@@ -84,15 +78,6 @@ class OpenMLDownloader(BaseDownloader):
             "description": ds.description or "",
             "url": ds.openml_url or "",
             "default_target": ds.default_target_attribute,
-            "columns": {
-                cs.column_name: {
-                    "semantic_name": cs.semantic_name,
-                    "description": cs.description,
-                    "data_type": cs.data_type,
-                    "role": cs.role,
-                }
-                for cs in column_semantics
-            },
         }
         meta_path = dest / "metadata.json"
         meta_path.write_text(
@@ -102,46 +87,6 @@ class OpenMLDownloader(BaseDownloader):
         return dest
 
     # ------------------------------------------------------------------
-
-    def _extract_semantics(
-        self, ds, column_names: list[str] | None = None
-    ) -> list[ColumnSemantic]:
-        """Extract column semantics by combining OpenML features API + description parsing."""
-        # 1. Get feature info from OpenML API
-        features = ds.features or {}
-        api_semantics: dict[str, ColumnSemantic] = {}
-        for _, feat in features.items():
-            api_semantics[feat.name] = ColumnSemantic(
-                column_name=feat.name,
-                data_type=feat.data_type or "",
-                role="target"
-                if feat.name == ds.default_target_attribute
-                else "feature",
-            )
-
-        if column_names is None:
-            column_names = list(api_semantics.keys())
-
-        # 2. Parse description text for semantic names & descriptions
-        desc_semantics = parse_attribute_semantics(ds.description or "", column_names)
-        desc_map = {cs.column_name: cs for cs in desc_semantics}
-
-        # 3. Merge: API provides data_type/role, description parsing provides semantic_name/description
-        merged: list[ColumnSemantic] = []
-        for col in column_names:
-            api = api_semantics.get(col, ColumnSemantic(column_name=col))
-            desc = desc_map.get(col, ColumnSemantic(column_name=col))
-            merged.append(
-                ColumnSemantic(
-                    column_name=col,
-                    semantic_name=desc.semantic_name,
-                    description=desc.description,
-                    data_type=api.data_type,
-                    role=api.role,
-                )
-            )
-
-        return merged
 
     def _row_to_info(self, row: pd.Series) -> DatasetInfo:
         return DatasetInfo(
