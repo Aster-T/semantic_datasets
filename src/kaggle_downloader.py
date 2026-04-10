@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -54,8 +55,10 @@ class KaggleDownloader(BaseDownloader):
             dataset_id: Format 'owner/dataset-slug', e.g. 'zillow/zecon'.
         """
         _, slug = dataset_id.split("/", 1)
-        meta = self._api.dataset_metadata(dataset_id)
-        info_data = meta if isinstance(meta, dict) else getattr(meta, "info", {}) or {}
+        with tempfile.TemporaryDirectory() as tmp:
+            self._api.dataset_metadata(dataset_id, path=tmp)
+            meta_file = Path(tmp) / "dataset-metadata.json"
+            info_data = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
         return DatasetInfo(
             name=slug,
             source=self.source_name,
@@ -80,8 +83,10 @@ class KaggleDownloader(BaseDownloader):
 
         # Fetch description via API before downloading files
         _, slug = dataset_id.split("/", 1)
-        meta = self._api.dataset_metadata(dataset_id)
-        info_data = meta if isinstance(meta, dict) else getattr(meta, "info", {}) or {}
+        with tempfile.TemporaryDirectory() as tmp:
+            self._api.dataset_metadata(dataset_id, path=tmp)
+            meta_file = Path(tmp) / "dataset-metadata.json"
+            info_data = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
         description = str(info_data.get("description", "") or "")
 
         self._api.dataset_download_files(dataset_id, path=str(dest), unzip=True)
