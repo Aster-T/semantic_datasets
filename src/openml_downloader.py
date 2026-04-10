@@ -70,14 +70,15 @@ class OpenMLDownloader(BaseDownloader):
         out_path = dest / f"{ds.name}.parquet"
         df.to_parquet(out_path, index=False)
 
-        # Save metadata with description
+        # Save metadata
         metadata = {
             "name": ds.name,
             "source": "openml",
             "dataset_id": dataset_id,
             "description": ds.description or "",
             "url": ds.openml_url or "",
-            "default_target": ds.default_target_attribute,
+            "default_target": ds.default_target_attribute or "",
+            "tags": list(ds.tag) if ds.tag else [],
         }
         meta_path = dest / "metadata.json"
         meta_path.write_text(

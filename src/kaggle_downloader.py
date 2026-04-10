@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -76,6 +77,11 @@ class KaggleDownloader(BaseDownloader):
         """
         dest = self._resolve_dest(dataset_id, dest_dir)
 
+        # Fetch description via API before downloading files
+        owner, slug = dataset_id.split("/", 1)
+        meta = self._api.dataset_view(owner, slug)
+        description = str(getattr(meta, "description", "") or "")
+
         self._api.dataset_download_files(dataset_id, path=str(dest), unzip=True)
 
         # Clean up leftover zip files
@@ -91,6 +97,21 @@ class KaggleDownloader(BaseDownloader):
                 csv_file.unlink()
             except Exception as e:
                 log.warning(f"Failed to convert {csv_file.name} to parquet: {e}")
+
+        # Save metadata
+        metadata = {
+            "name": slug,
+            "source": "kaggle",
+            "dataset_id": dataset_id,
+            "description": description,
+            "url": f"https://www.kaggle.com/datasets/{dataset_id}",
+            "default_target": "",
+            "tags": [str(t) for t in getattr(meta, "tags", [])],
+        }
+        meta_path = dest / "metadata.json"
+        meta_path.write_text(
+            json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
 
         return dest
 
