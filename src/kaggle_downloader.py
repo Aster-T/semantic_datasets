@@ -53,19 +53,20 @@ class KaggleDownloader(BaseDownloader):
         Args:
             dataset_id: Format 'owner/dataset-slug', e.g. 'zillow/zecon'.
         """
-        owner, slug = dataset_id.split("/", 1)
-        meta = self._api.dataset_view(owner, slug)
+        _, slug = dataset_id.split("/", 1)
+        meta = self._api.dataset_metadata(dataset_id)
+        info_data = meta if isinstance(meta, dict) else getattr(meta, "info", {}) or {}
         return DatasetInfo(
             name=slug,
             source=self.source_name,
             dataset_id=dataset_id,
-            description=str(getattr(meta, "description", "") or "")[:500],
-            size=str(getattr(meta, "totalBytes", "")),
-            tags=[str(t) for t in getattr(meta, "tags", [])],
+            description=str(info_data.get("description", "") or "")[:500],
+            size=str(info_data.get("totalBytes", "")),
+            tags=[str(t) for t in info_data.get("tags", [])],
             url=f"https://www.kaggle.com/datasets/{dataset_id}",
             extra={
-                "license": str(getattr(meta, "licenseName", "")),
-                "last_updated": str(getattr(meta, "lastUpdated", "")),
+                "license": str(info_data.get("licenseName", "")),
+                "last_updated": str(info_data.get("lastUpdated", "")),
             },
         )
 
@@ -78,9 +79,10 @@ class KaggleDownloader(BaseDownloader):
         dest = self._resolve_dest(dataset_id, dest_dir)
 
         # Fetch description via API before downloading files
-        owner, slug = dataset_id.split("/", 1)
-        meta = self._api.dataset_view(owner, slug)
-        description = str(getattr(meta, "description", "") or "")
+        _, slug = dataset_id.split("/", 1)
+        meta = self._api.dataset_metadata(dataset_id)
+        info_data = meta if isinstance(meta, dict) else getattr(meta, "info", {}) or {}
+        description = str(info_data.get("description", "") or "")
 
         self._api.dataset_download_files(dataset_id, path=str(dest), unzip=True)
 
@@ -106,7 +108,7 @@ class KaggleDownloader(BaseDownloader):
             "description": description,
             "url": f"https://www.kaggle.com/datasets/{dataset_id}",
             "default_target": "",
-            "tags": [str(t) for t in getattr(meta, "tags", [])],
+            "tags": [str(t) for t in info_data.get("tags", [])],
         }
         meta_path = dest / "metadata.json"
         meta_path.write_text(
