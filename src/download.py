@@ -47,21 +47,32 @@ def get_all_openml_ids() -> list[str]:
     return [str(i) for i in ids]
 
 
-def get_all_kaggle_ids(max_pages: int = 100) -> list[str]:
-    """Fetch dataset IDs (owner/slug) from Kaggle, paginated."""
+# 单个数据集大小上限（字节），超过则跳过。默认 500 MB
+MAX_DATASET_BYTES = 500 * 1024 * 1024
+
+
+def get_all_kaggle_ids() -> list[str]:
+    """Fetch all CSV dataset IDs (owner/slug) from Kaggle, auto-paginating until exhausted."""
     log.info("Fetching dataset list from Kaggle...")
     api = KaggleApi()
     api.authenticate()
     all_refs: list[str] = []
-    for page in range(1, max_pages + 1):
-        results = api.dataset_list(page=page)
+    page = 1
+    while True:
+        results = api.dataset_list(page=page, file_type="csv")
         if not results:
             break
         for ds in results:
             ref = str(getattr(ds, "ref", ""))
-            if ref:
-                all_refs.append(ref)
-    log.info(f"Found {len(all_refs)} datasets on Kaggle")
+            size = getattr(ds, "totalBytes", 0) or 0
+            if not ref:
+                continue
+            if size > MAX_DATASET_BYTES:
+                log.info(f"Skipping {ref} (size {size / 1024 / 1024:.0f} MB > limit)")
+                continue
+            all_refs.append(ref)
+        page += 1
+    log.info(f"Found {len(all_refs)} datasets on Kaggle (after size filter)")
     return all_refs
 
 

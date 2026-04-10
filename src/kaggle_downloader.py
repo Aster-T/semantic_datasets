@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+import pandas as pd
 from kaggle.api.kaggle_api_extended import KaggleApi
 
 from base import BaseDownloader, DatasetInfo
+
+log = logging.getLogger(__name__)
 
 
 class KaggleDownloader(BaseDownloader):
@@ -77,6 +81,16 @@ class KaggleDownloader(BaseDownloader):
         # Clean up leftover zip files
         for zf in dest.glob("*.zip"):
             zf.unlink()
+
+        # Convert CSV files to parquet
+        for csv_file in list(dest.rglob("*.csv")):
+            try:
+                df = pd.read_csv(csv_file)
+                parquet_path = csv_file.with_suffix(".parquet")
+                df.to_parquet(parquet_path, index=False)
+                csv_file.unlink()
+            except Exception as e:
+                log.warning(f"Failed to convert {csv_file.name} to parquet: {e}")
 
         return dest
 
