@@ -1,11 +1,14 @@
+import argparse
 import json
 import logging
 from pathlib import Path
 
 import openml
 import pandas as pd
+from kaggle.api.kaggle_api_extended import KaggleApi
 
 from openml_downloader import OpenMLDownloader
+from kaggle_downloader import KaggleDownloader
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,48 +17,90 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 DATA_DIR = Path("./data")
-PROGRESS_FILE = DATA_DIR / "openml_progress.json"
 
 
-def load_progress() -> set[int]:
+def progress_file(source: str) -> Path:
+    return DATA_DIR / f"{source}_progress.json"
+
+
+def load_progress(source: str) -> set[str]:
     """Load already-downloaded dataset IDs from progress file."""
-    if PROGRESS_FILE.exists():
-        return set(json.loads(PROGRESS_FILE.read_text()))
+    pf = progress_file(source)
+    if pf.exists():
+        return set(json.loads(pf.read_text()))
     return set()
 
 
-def save_progress(done: set[int]) -> None:
-    PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PROGRESS_FILE.write_text(json.dumps(sorted(done)))
+def save_progress(source: str, done: set[str]) -> None:
+    pf = progress_file(source)
+    pf.parent.mkdir(parents=True, exist_ok=True)
+    pf.write_text(json.dumps(sorted(done)))
 
 
-def get_all_dataset_ids() -> list[int]:
+def get_all_openml_ids() -> list[str]:
     """Fetch all dataset IDs from OpenML, sorted by ID."""
     log.info("Fetching dataset list from OpenML...")
     df = openml.datasets.list_datasets(output_format="dataframe")
     assert isinstance(df, pd.DataFrame)
     ids = sorted(df.index.tolist())
     log.info(f"Found {len(ids)} datasets on OpenML")
-    return ids
+    return [str(i) for i in ids]
+
+
+def get_all_kaggle_ids(max_pages: int = 100) -> list[str]:
+    """Fetch dataset IDs (owner/slug) from Kaggle, paginated."""
+    log.info("Fetching dataset list from Kaggle...")
+    api = KaggleApi()
+    api.authenticate()
+    all_refs: list[str] = []
+    for page in range(1, max_pages + 1):
+        results = api.dataset_list(page=page)
+        if not results:
+            break
+        for ds in results:
+            ref = str(getattr(ds, "ref", ""))
+            if ref:
+                all_refs.append(ref)
+    log.info(f"Found {len(all_refs)} datasets on Kaggle")
+    return all_refs
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Download datasets from OpenML or Kaggle")
+    parser.add_argument(
+        "--source",
+        choices=["openml", "kaggle"],
+        default="openml",
+        help="Data source to download from (default: openml)",
+    )
+    return parser.parse_args()
 
 
 def main():
-    downloader = OpenMLDownloader(data_dir=DATA_DIR)
-    all_ids = get_all_dataset_ids()
+    args = parse_args()
+    source = args.source
 
-    done = load_progress()
+    if source == "openml":
+        downloader = OpenMLDownloader(data_dir=DATA_DIR)
+        all_ids = get_all_openml_ids()
+    elif source == "kaggle":
+        downloader = KaggleDownloader(data_dir=DATA_DIR)
+        all_ids = get_all_kaggle_ids()
+    else:
+        raise ValueError(f"Unknown source: {source!r}. Use 'openml' or 'kaggle'.")
+
+    done = load_progress(source)
     remaining = [did for did in all_ids if did not in done]
-    log.info(f"Already downloaded: {len(done)}, remaining: {len(remaining)}")
+    log.info(f"[{source}] Already downloaded: {len(done)}, remaining: {len(remaining)}")
 
-    failed: list[tuple[int, str]] = []
+    failed: list[tuple[str, str]] = []
 
     for i, dataset_id in enumerate(remaining, 1):
-        log.info(f"[{i}/{len(remaining)}] Downloading dataset {dataset_id} ...")
+        log.info(f"[{i}/{len(remaining)}] Downloading {source} dataset {dataset_id} ...")
         try:
-            downloader.download(str(dataset_id))
+            downloader.download(dataset_id)
             done.add(dataset_id)
-            # Save progress after each successful download
-            save_progress(done)
+            save_progress(source, done)
         except Exception as e:
             log.warning(f"Failed to download dataset {dataset_id}: {e}")
             failed.append((dataset_id, str(e)))
@@ -63,7 +108,7 @@ def main():
 
     log.info(f"Done. Downloaded: {len(done)}, Failed: {len(failed)}")
     if failed:
-        fail_path = DATA_DIR / "openml_failed.json"
+        fail_path = DATA_DIR / f"{source}_failed.json"
         fail_path.write_text(
             json.dumps([{"id": fid, "error": err} for fid, err in failed],
                        indent=2, ensure_ascii=False)
