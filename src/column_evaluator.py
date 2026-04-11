@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 log = logging.getLogger(__name__)
 
@@ -134,13 +134,21 @@ class EvalResult:
 class ColumnEvaluator:
     """Evaluate column header semantic quality using an LLM."""
 
+    LOCAL_BASE_URL = "http://localhost:8000/v1"
+    LOCAL_API_KEY = "no-key-required"
+
     def __init__(
         self,
         model: str = "gpt-4o-mini",
         base_url: str | None = None,
         api_key: str | None = None,
+        local: bool = False,
     ):
+        if local:
+            base_url = base_url or self.LOCAL_BASE_URL
+            api_key = api_key or self.LOCAL_API_KEY
         self._client = OpenAI(base_url=base_url, api_key=api_key)
+        self._async_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self._model = model
 
     def evaluate(
@@ -157,6 +165,44 @@ class ColumnEvaluator:
         )
 
         response = self._client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+
+        content = response.choices[0].message.content or "{}"
+        try:
+            result = json.loads(content)
+        except json.JSONDecodeError:
+            log.warning(f"LLM returned invalid JSON for {dataset_id}: {content[:200]}")
+            result = {"quality": "low", "column_mapping": {}}
+
+        return EvalResult(
+            dataset_id=dataset_id,
+            source=source,
+            quality=result.get("quality", "low"),
+            columns=columns,
+            column_mapping=result.get("column_mapping", {}),
+        )
+
+    async def async_evaluate(
+        self,
+        columns: list[str],
+        description: str,
+        dataset_id: str = "",
+        source: str = "",
+    ) -> EvalResult:
+        """Async version of evaluate for concurrent execution."""
+        user_prompt = USER_PROMPT_TEMPLATE.format(
+            columns=json.dumps(columns, ensure_ascii=False),
+            description=description[:3000],
+        )
+
+        response = await self._async_client.chat.completions.create(
             model=self._model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},

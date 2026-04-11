@@ -1,6 +1,7 @@
 """Batch evaluate downloaded datasets for column semantic quality."""
 
 import argparse
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -120,17 +121,44 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--base-url",
         default=None,
-        help="OpenAI-compatible API base URL",
+        help="OpenAI-compatible API base URL (default: http://localhost:8000/v1 when --local)",
     )
     parser.add_argument(
         "--api-key",
         default=None,
         help="API key (default: read from OPENAI_API_KEY env var)",
     )
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        default=False,
+        help="Use local LLM server at http://localhost:8000/v1",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=10,
+        help="Max concurrent LLM requests (default: 10)",
+    )
     return parser.parse_args()
 
 
-def main():
+async def evaluate_one(
+    evaluator: ColumnEvaluator,
+    ds: dict,
+    semaphore: asyncio.Semaphore,
+) -> EvalResult:
+    """Evaluate a single dataset with concurrency control."""
+    async with semaphore:
+        return await evaluator.async_evaluate(
+            columns=ds["columns"],
+            description=ds["description"],
+            dataset_id=ds["dataset_id"],
+            source=ds["source"],
+        )
+
+
+async def async_main():
     args = parse_args()
     source = args.source
 
@@ -138,6 +166,7 @@ def main():
         model=args.model,
         base_url=args.base_url,
         api_key=args.api_key,
+        local=args.local,
     )
 
     output_dir = DATA_DIR / "eval"
@@ -148,28 +177,39 @@ def main():
     remaining = [ds for ds in datasets if ds["dataset_id"] not in done]
     log.info(f"[{source}] Found {len(datasets)} datasets, already evaluated: {len(done)}, remaining: {len(remaining)}")
 
-    failed: list[tuple[str, str]] = []
+    if not remaining:
+        log.info("Nothing to evaluate.")
+        return
 
-    for i, ds in enumerate(remaining, 1):
-        dataset_id = ds["dataset_id"]
-        log.info(f"[{i}/{len(remaining)}] Evaluating {dataset_id} ...")
+    semaphore = asyncio.Semaphore(args.concurrency)
+    log.info(f"Running with concurrency={args.concurrency}")
+
+    # Create all tasks
+    tasks = {
+        ds["dataset_id"]: asyncio.create_task(evaluate_one(evaluator, ds, semaphore))
+        for ds in remaining
+    }
+
+    failed: list[tuple[str, str]] = []
+    completed = 0
+
+    for dataset_id, task in tasks.items():
         try:
-            result = evaluator.evaluate(
-                columns=ds["columns"],
-                description=ds["description"],
-                dataset_id=dataset_id,
-                source=source,
-            )
+            result = await task
             save_result(result, output_dir)
             done.add(dataset_id)
-            save_eval_progress(progress_path, done)
-            log.info(f"  -> quality={result.quality}, mapping_count={len(result.column_mapping)}")
+            completed += 1
+            if completed % 50 == 0 or completed == len(tasks):
+                save_eval_progress(progress_path, done)
+            log.info(f"[{completed}/{len(tasks)}] {dataset_id} -> quality={result.quality}, mapping_count={len(result.column_mapping)}")
         except Exception as e:
             log.warning(f"Failed to evaluate {dataset_id}: {e}")
             failed.append((dataset_id, str(e)))
-            continue
 
-    log.info(f"Done. Evaluated: {len(done)}, Failed: {len(failed)}")
+    # Final progress save
+    save_eval_progress(progress_path, done)
+
+    log.info(f"Done. Evaluated: {completed}, Failed: {len(failed)}")
     if failed:
         fail_path = output_dir / f"{source}_eval_failed.json"
         fail_path.write_text(
@@ -177,6 +217,10 @@ def main():
                        indent=2, ensure_ascii=False)
         )
         log.info(f"Failed list saved to {fail_path}")
+
+
+def main():
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":
