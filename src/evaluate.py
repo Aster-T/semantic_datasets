@@ -140,6 +140,12 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="Max concurrent LLM requests (default: 10)",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Max number of datasets to evaluate (default: all)",
+    )
     return parser.parse_args()
 
 
@@ -175,6 +181,8 @@ async def async_main():
 
     datasets = discover_datasets(source)
     remaining = [ds for ds in datasets if ds["dataset_id"] not in done]
+    if args.limit is not None:
+        remaining = remaining[:args.limit]
     log.info(f"[{source}] Found {len(datasets)} datasets, already evaluated: {len(done)}, remaining: {len(remaining)}")
 
     if not remaining:
