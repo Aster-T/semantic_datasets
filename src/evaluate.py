@@ -38,8 +38,15 @@ def discover_datasets(source: str) -> list[dict]:
         log.warning(f"Source directory not found: {source_dir}")
         return []
 
+    def _sort_key(p: Path) -> tuple:
+        """Sort numerically when the directory name is a number, otherwise lexicographically."""
+        try:
+            return (0, int(p.name))
+        except ValueError:
+            return (1, p.name)
+
     datasets: list[dict] = []
-    for ds_dir in sorted(source_dir.iterdir()):
+    for ds_dir in sorted(source_dir.iterdir(), key=_sort_key):
         if not ds_dir.is_dir():
             continue
 
