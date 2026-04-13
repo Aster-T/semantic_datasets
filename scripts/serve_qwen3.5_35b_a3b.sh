@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-vllm serve Qwen/Qwen3.5-4B \
+vllm serve Qwen/Qwen3.5-35B-A3B \
     --port 8000 \
-    --tensor-parallel-size 1 \
+    --tensor-parallel-size 2 \
     --max-model-len 32768 \
     --max-num-seqs 1024 \
     --max-num-batched-tokens 65536 \
