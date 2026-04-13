@@ -156,8 +156,9 @@ class EvalResult:
 class ColumnEvaluator:
     """Evaluate column header semantic quality using an LLM."""
 
-    LOCAL_BASE_URL = "http://localhost:8000/v1"
+    LOCAL_BASE_URL = "http://127.0.0.1:8000/v1"
     LOCAL_API_KEY = "no-key-required"
+    LOCAL_TIMEOUT_SECONDS = 300.0
 
     def __init__(
         self,
@@ -169,8 +170,13 @@ class ColumnEvaluator:
         if local:
             base_url = base_url or self.LOCAL_BASE_URL
             api_key = api_key or self.LOCAL_API_KEY
-        self._client = OpenAI(base_url=base_url, api_key=api_key)
-        self._async_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        timeout = self.LOCAL_TIMEOUT_SECONDS if local else None
+        self._client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
+        self._async_client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=timeout,
+        )
         self._model = model
 
     def evaluate(

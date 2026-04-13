@@ -5,6 +5,10 @@ import asyncio
 import json
 import logging
 import random
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import pandas as pd
@@ -18,6 +22,49 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 DATA_DIR = Path("./data")
+
+
+def wait_for_local_server(
+    base_url: str,
+    model: str,
+    timeout_seconds: int = 300,
+    poll_interval_seconds: int = 2,
+) -> None:
+    """Wait until the local OpenAI-compatible server is ready."""
+    models_url = urllib.parse.urljoin(base_url.rstrip("/") + "/", "models")
+    deadline = time.time() + timeout_seconds
+    last_error = ""
+
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(models_url, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            models = payload.get("data", []) if isinstance(payload, dict) else []
+            model_ids = [
+                str(item.get("id", ""))
+                for item in models
+                if isinstance(item, dict) and item.get("id")
+            ]
+            if model_ids:
+                if model not in model_ids:
+                    log.warning(
+                        "Local server is ready at %s, but model '%s' is not listed. Available models: %s",
+                        base_url,
+                        model,
+                        ", ".join(model_ids),
+                    )
+                else:
+                    log.info("Local server is ready at %s with model %s", base_url, model)
+                return
+            log.info("Local server at %s is up but has not exposed any models yet.", base_url)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            last_error = str(exc)
+        time.sleep(poll_interval_seconds)
+
+    raise RuntimeError(
+        f"Local server at {base_url} was not ready within {timeout_seconds}s. "
+        f"Last error: {last_error or 'unknown'}"
+    )
 
 
 def load_eval_progress(path: Path) -> set[str]:
@@ -139,7 +186,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--base-url",
         default=None,
-        help="OpenAI-compatible API base URL (default: http://localhost:8000/v1 when --local)",
+        help="OpenAI-compatible API base URL (default: http://127.0.0.1:8000/v1 when --local)",
     )
     parser.add_argument(
         "--api-key",
@@ -150,7 +197,7 @@ def parse_args() -> argparse.Namespace:
         "--local",
         action="store_true",
         default=False,
-        help="Use local LLM server at http://localhost:8000/v1",
+        help="Use local LLM server at http://127.0.0.1:8000/v1",
     )
     parser.add_argument(
         "--concurrency",
@@ -197,6 +244,15 @@ async def evaluate_one(
 async def async_main():
     args = parse_args()
     source = args.source
+
+    if args.local:
+        base_url = args.base_url or ColumnEvaluator.LOCAL_BASE_URL
+        wait_for_local_server(base_url=base_url, model=args.model)
+        if args.concurrency > 8:
+            log.warning(
+                "Local concurrency=%s is aggressive for Qwen/Qwen3.5-35B-A3B; reduce it if connection errors persist.",
+                args.concurrency,
+            )
 
     evaluator = ColumnEvaluator(
         model=args.model,
