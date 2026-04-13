@@ -172,10 +172,10 @@ Output:
 
 
 USER_PROMPT_TEMPLATE = """\
-Dataset name: {datasetname}
+Dataset name: {dataset_name}
 
 Column names: {columns}
-Types: {types}
+Types: {column_types}
 
 Dataset description:
 {description}
@@ -184,6 +184,25 @@ Known task type: {task_type}
 Known target column: {default_target}
 
 Assess the header quality and output the JSON."""
+
+
+def build_user_prompt(
+    columns: list[str],
+    column_types: list[str],
+    description: str,
+    dataset_name: str = "",
+    task_type: str = "",
+    default_target: str = "",
+) -> str:
+    """Render the user prompt with dataset metadata and normalized text."""
+    return USER_PROMPT_TEMPLATE.format(
+        dataset_name=dataset_name or "unknown",
+        columns=json.dumps(columns, ensure_ascii=False),
+        column_types=json.dumps(column_types, ensure_ascii=False),
+        description=clean_description(description),
+        task_type=task_type or "unknown",
+        default_target=default_target or "unknown",
+    )
 
 
 @dataclass
@@ -229,18 +248,22 @@ class ColumnEvaluator:
     def evaluate(
         self,
         columns: list[str],
+        column_types: list[str],
         description: str,
         dataset_id: str = "",
+        dataset_name: str = "",
         source: str = "",
         task_type: str = "",
         default_target: str = "",
     ) -> EvalResult:
         """Evaluate column quality and extract semantic mappings if possible."""
-        user_prompt = USER_PROMPT_TEMPLATE.format(
-            columns=json.dumps(columns, ensure_ascii=False),
-            description=clean_description(description),
-            task_type=task_type or "unknown",
-            default_target=default_target or "unknown",
+        user_prompt = build_user_prompt(
+            columns=columns,
+            column_types=column_types,
+            description=description,
+            dataset_name=dataset_name or dataset_id,
+            task_type=task_type,
+            default_target=default_target,
         )
 
         response = self._client.chat.completions.create(
@@ -267,25 +290,29 @@ class ColumnEvaluator:
             description=result.get("description", ""),
             columns=result.get("columns", {}),
             columns_mapping=result.get("columns_mapping", {}),
-            task_type=result.get("Task_type", ""),
+            task_type=result.get("task_type") or result.get("Task_type", ""),
             target_column=result.get("target_column", ""),
         )
 
     async def async_evaluate(
         self,
         columns: list[str],
+        column_types: list[str],
         description: str,
         dataset_id: str = "",
+        dataset_name: str = "",
         source: str = "",
         task_type: str = "",
         default_target: str = "",
     ) -> EvalResult:
         """Async version of evaluate for concurrent execution."""
-        user_prompt = USER_PROMPT_TEMPLATE.format(
-            columns=json.dumps(columns, ensure_ascii=False),
-            description=clean_description(description),
-            task_type=task_type or "unknown",
-            default_target=default_target or "unknown",
+        user_prompt = build_user_prompt(
+            columns=columns,
+            column_types=column_types,
+            description=description,
+            dataset_name=dataset_name or dataset_id,
+            task_type=task_type,
+            default_target=default_target,
         )
 
         response = await self._async_client.chat.completions.create(
@@ -312,6 +339,6 @@ class ColumnEvaluator:
             description=result.get("description", ""),
             columns=result.get("columns", {}),
             columns_mapping=result.get("columns_mapping", {}),
-            task_type=result.get("Task_type", ""),
+            task_type=result.get("task_type") or result.get("Task_type", ""),
             target_column=result.get("target_column", ""),
         )

@@ -11,7 +11,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-import pandas as pd
+import pyarrow.parquet as pq
+from pyarrow import types as pa_types
 
 from column_evaluator import ColumnEvaluator, EvalResult
 
@@ -22,6 +23,43 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 DATA_DIR = Path("./data")
+
+
+def _arrow_type_to_semantic_type(field_type) -> str:
+    """Map a parquet field type to the coarse semantic type expected by the prompt."""
+    if (
+        pa_types.is_int8(field_type)
+        or pa_types.is_int16(field_type)
+        or pa_types.is_int32(field_type)
+        or pa_types.is_int64(field_type)
+        or pa_types.is_uint8(field_type)
+        or pa_types.is_uint16(field_type)
+        or pa_types.is_uint32(field_type)
+        or pa_types.is_uint64(field_type)
+        or pa_types.is_float16(field_type)
+        or pa_types.is_float32(field_type)
+        or pa_types.is_float64(field_type)
+        or pa_types.is_decimal(field_type)
+    ):
+        return "numeric"
+    if pa_types.is_boolean(field_type) or pa_types.is_dictionary(field_type):
+        return "nominal"
+    if (
+        pa_types.is_date(field_type)
+        or pa_types.is_time(field_type)
+        or pa_types.is_timestamp(field_type)
+        or pa_types.is_duration(field_type)
+    ):
+        return "ordinal"
+    return "string"
+
+
+def _read_parquet_schema(parquet_path: Path) -> tuple[list[str], list[str]]:
+    """Read column names and coarse semantic types from parquet schema metadata."""
+    schema = pq.read_schema(parquet_path)
+    columns = [field.name for field in schema]
+    column_types = [_arrow_type_to_semantic_type(field.type) for field in schema]
+    return columns, column_types
 
 
 def wait_for_local_server(
@@ -80,7 +118,7 @@ def save_eval_progress(path: Path, done: set[str]) -> None:
 
 
 def discover_datasets(source: str) -> list[dict]:
-    """Scan data/{source}/ and collect (dataset_id, columns, description) for each dataset."""
+    """Scan data/{source}/ and collect dataset metadata for evaluation."""
     source_dir = DATA_DIR / source
     if not source_dir.exists():
         log.warning(f"Source directory not found: {source_dir}")
@@ -115,19 +153,20 @@ def discover_datasets(source: str) -> list[dict]:
 
 
 def _read_dataset_dir(ds_dir: Path, source: str, dataset_id: str) -> dict | None:
-    """Read columns from parquet and description from metadata.json."""
+    """Read schema from parquet and metadata from metadata.json."""
     # Find a parquet file
     parquet_files = list(ds_dir.glob("*.parquet"))
     if not parquet_files:
         return None
 
     try:
-        columns = pd.read_parquet(parquet_files[0], columns=[]).columns.tolist()
+        columns, column_types = _read_parquet_schema(parquet_files[0])
     except Exception as e:
         log.warning(f"Cannot read parquet {parquet_files[0]}: {e}")
         return None
 
     # Read metadata from metadata.json
+    dataset_name = dataset_id
     description = ""
     task_type = ""
     default_target = ""
@@ -135,6 +174,7 @@ def _read_dataset_dir(ds_dir: Path, source: str, dataset_id: str) -> dict | None
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            dataset_name = meta.get("name") or dataset_name
             description = meta.get("description", "")
             task_type = meta.get("task_type", "")
             default_target = meta.get("default_target", "")
@@ -143,8 +183,10 @@ def _read_dataset_dir(ds_dir: Path, source: str, dataset_id: str) -> dict | None
 
     return {
         "dataset_id": dataset_id,
+        "dataset_name": dataset_name,
         "source": source,
         "columns": columns,
+        "column_types": column_types,
         "description": description,
         "task_type": task_type,
         "default_target": default_target,
@@ -163,7 +205,7 @@ def save_result(result: EvalResult, output_dir: Path, model: str) -> None:
         "description": result.description,
         "columns": result.columns,
         "columns_mapping": result.columns_mapping,
-        "Task_type": result.task_type,
+        "task_type": result.task_type,
         "target_column": result.target_column,
     }
     with open(output_file, "a", encoding="utf-8") as f:
@@ -226,8 +268,10 @@ async def evaluate_one(
             async with semaphore:
                 return await evaluator.async_evaluate(
                     columns=ds["columns"],
+                    column_types=ds["column_types"],
                     description=ds["description"],
                     dataset_id=ds["dataset_id"],
+                    dataset_name=ds.get("dataset_name", ds["dataset_id"]),
                     source=ds["source"],
                     task_type=ds.get("task_type", ""),
                     default_target=ds.get("default_target", ""),
