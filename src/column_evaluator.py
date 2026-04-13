@@ -142,9 +142,12 @@ class EvalResult:
 
     dataset_id: str
     source: str
-    quality: str  # "high" or "low"
-    columns: list[str]
-    column_mapping: dict[str, str]  # original -> semantic name
+    quality: str  # "high", "mid", or "low"
+    description: str
+    columns: dict[str, dict]  # col_name -> {"type": ..., "description": ...}
+    columns_mapping: dict[str, str]  # original -> semantic name
+    task_type: str  # "classification" or "regression"
+    target_column: str
 
 
 class ColumnEvaluator:
@@ -195,14 +198,17 @@ class ColumnEvaluator:
             result = json.loads(content)
         except json.JSONDecodeError:
             log.warning(f"LLM returned invalid JSON for {dataset_id}: {content[:200]}")
-            result = {"quality": "low", "column_mapping": {}}
+            result = {"quality": "low", "columns_mapping": {}}
 
         return EvalResult(
             dataset_id=dataset_id,
             source=source,
             quality=result.get("quality", "low"),
-            columns=columns,
-            column_mapping=result.get("column_mapping", {}),
+            description=result.get("description", ""),
+            columns=result.get("columns", {}),
+            columns_mapping=result.get("columns_mapping", {}),
+            task_type=result.get("Task_type", ""),
+            target_column=result.get("target_column", ""),
         )
 
     async def async_evaluate(
@@ -233,12 +239,15 @@ class ColumnEvaluator:
             result = json.loads(content)
         except json.JSONDecodeError:
             log.warning(f"LLM returned invalid JSON for {dataset_id}: {content[:200]}")
-            result = {"quality": "low", "column_mapping": {}}
+            result = {"quality": "low", "columns_mapping": {}}
 
         return EvalResult(
             dataset_id=dataset_id,
             source=source,
             quality=result.get("quality", "low"),
-            columns=columns,
-            column_mapping=result.get("column_mapping", {}),
+            description=result.get("description", ""),
+            columns=result.get("columns", {}),
+            columns_mapping=result.get("columns_mapping", {}),
+            task_type=result.get("Task_type", ""),
+            target_column=result.get("target_column", ""),
         )

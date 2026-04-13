@@ -106,8 +106,11 @@ def save_result(result: EvalResult, output_dir: Path, model: str) -> None:
         "dataset_id": result.dataset_id,
         "source": result.source,
         "quality": result.quality,
+        "description": result.description,
         "columns": result.columns,
-        "column_mapping": result.column_mapping,
+        "columns_mapping": result.columns_mapping,
+        "Task_type": result.task_type,
+        "target_column": result.target_column,
     }
     with open(output_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
