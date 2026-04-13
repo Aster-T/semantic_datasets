@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SOURCE="${1:-openml}"
-MODEL="${2:-Qwen/Qwen3.5-4B}"
+MODEL="${2:-Qwen/Qwen3.5-35B-A3B}"
 CONCURRENCY="${3:-30}"
 LIMIT="${4:-}"
 
