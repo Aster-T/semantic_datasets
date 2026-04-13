@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import logging
+import random
 from pathlib import Path
 
 import pandas as pd
@@ -170,17 +171,27 @@ async def evaluate_one(
     evaluator: ColumnEvaluator,
     ds: dict,
     semaphore: asyncio.Semaphore,
+    max_retries: int = 3,
 ) -> EvalResult:
-    """Evaluate a single dataset with concurrency control."""
-    async with semaphore:
-        return await evaluator.async_evaluate(
-            columns=ds["columns"],
-            description=ds["description"],
-            dataset_id=ds["dataset_id"],
-            source=ds["source"],
-            task_type=ds.get("task_type", ""),
-            default_target=ds.get("default_target", ""),
-        )
+    """Evaluate a single dataset with concurrency control and retry."""
+    for attempt in range(max_retries + 1):
+        try:
+            async with semaphore:
+                return await evaluator.async_evaluate(
+                    columns=ds["columns"],
+                    description=ds["description"],
+                    dataset_id=ds["dataset_id"],
+                    source=ds["source"],
+                    task_type=ds.get("task_type", ""),
+                    default_target=ds.get("default_target", ""),
+                )
+        except Exception as e:
+            if attempt < max_retries:
+                wait = 2 ** attempt + random.uniform(0, 1)
+                log.info(f"Retry {attempt + 1}/{max_retries} for {ds['dataset_id']} in {wait:.2f}s: {e}")
+                await asyncio.sleep(wait)
+            else:
+                raise
 
 
 async def async_main():
@@ -212,28 +223,27 @@ async def async_main():
     semaphore = asyncio.Semaphore(args.concurrency)
     log.info(f"Running with concurrency={args.concurrency}")
 
-    # Create all tasks
-    tasks = {
-        ds["dataset_id"]: asyncio.create_task(evaluate_one(evaluator, ds, semaphore))
-        for ds in remaining
-    }
-
     failed: list[tuple[str, str]] = []
     completed = 0
+    total = len(remaining)
 
-    for dataset_id, task in tasks.items():
+    async def run_one(ds: dict) -> None:
+        nonlocal completed
+        dataset_id = ds["dataset_id"]
         try:
-            result = await task
+            result = await evaluate_one(evaluator, ds, semaphore)
             save_result(result, output_dir, args.model)
             done.add(dataset_id)
             completed += 1
-            if completed % 50 == 0 or completed == len(tasks):
+            if completed % 50 == 0 or completed == total:
                 save_eval_progress(progress_path, done)
-            if completed % 100 == 0 or completed == len(tasks):
-                log.info(f"Progress: {completed}/{len(tasks)}")
+            if completed % 100 == 0 or completed == total:
+                log.info(f"Progress: {completed}/{total}")
         except Exception as e:
             log.warning(f"Failed to evaluate {dataset_id}: {e}")
             failed.append((dataset_id, str(e)))
+
+    await asyncio.gather(*[run_one(ds) for ds in remaining])
 
     # Final progress save
     save_eval_progress(progress_path, done)
