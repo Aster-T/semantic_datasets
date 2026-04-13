@@ -3,8 +3,6 @@ import json
 import logging
 from pathlib import Path
 
-import openml
-import pandas as pd
 from kaggle.api.kaggle_api_extended import KaggleApi
 
 from openml_downloader import OpenMLDownloader
@@ -37,14 +35,12 @@ def save_progress(source: str, done: set[str]) -> None:
     pf.write_text(json.dumps(sorted(done)))
 
 
-def get_all_openml_ids() -> list[str]:
+def get_all_openml_ids(downloader: OpenMLDownloader) -> list[str]:
     """Fetch all dataset IDs from OpenML, sorted by ID."""
     log.info("Fetching dataset list from OpenML...")
-    df = openml.datasets.list_datasets(output_format="dataframe")
-    assert isinstance(df, pd.DataFrame)
-    ids = sorted(df.index.tolist())
+    ids = downloader.all_dataset_ids()
     log.info(f"Found {len(ids)} datasets on OpenML")
-    return [str(i) for i in ids]
+    return ids
 
 
 # 单个数据集大小上限（字节），超过则跳过。默认 500 MB
@@ -93,7 +89,7 @@ def main():
 
     if source == "openml":
         downloader = OpenMLDownloader(data_dir=DATA_DIR)
-        all_ids = get_all_openml_ids()
+        all_ids = get_all_openml_ids(downloader)
     elif source == "kaggle":
         downloader = KaggleDownloader(data_dir=DATA_DIR)
         all_ids = get_all_kaggle_ids()
