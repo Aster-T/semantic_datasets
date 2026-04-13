@@ -4,11 +4,27 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 from openai import AsyncOpenAI, OpenAI
 
 log = logging.getLogger(__name__)
+
+
+def clean_description(text: str) -> str:
+    """Remove HTML tags, URLs, and excessive whitespace from description text."""
+    # Remove HTML tags
+    text = re.sub(r"<[^>]+>", " ", text)
+    # Remove URLs
+    text = re.sub(r"https?://\S+", "", text)
+    # Remove markdown link syntax residuals [text](url)
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    # Remove markdown image syntax ![alt](url)
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+    # Collapse multiple whitespace / newlines
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 SYSTEM_PROMPT = """\
 **Role:** A data engineering expert
@@ -161,7 +177,7 @@ class ColumnEvaluator:
         """Evaluate column quality and extract semantic mappings if possible."""
         user_prompt = USER_PROMPT_TEMPLATE.format(
             columns=json.dumps(columns, ensure_ascii=False),
-            description=description[:3000],  # truncate very long descriptions
+            description=clean_description(description),
         )
 
         response = self._client.chat.completions.create(
@@ -199,7 +215,7 @@ class ColumnEvaluator:
         """Async version of evaluate for concurrent execution."""
         user_prompt = USER_PROMPT_TEMPLATE.format(
             columns=json.dumps(columns, ensure_ascii=False),
-            description=description[:3000],
+            description=clean_description(description),
         )
 
         response = await self._async_client.chat.completions.create(
