@@ -187,7 +187,7 @@ USER_PROMPT_TEMPLATE = """\
 Dataset name: {dataset_name}
 
 Column names: {columns}
-Types: {types}
+Types: {column_types}
 
 Dataset description:
 {description}
