@@ -218,7 +218,8 @@ async def async_main():
             completed += 1
             if completed % 50 == 0 or completed == len(tasks):
                 save_eval_progress(progress_path, done)
-            log.info(f"[{completed}/{len(tasks)}] {dataset_id} -> quality={result.quality}, mapping_count={len(result.column_mapping)}")
+            if completed % 100 == 0 or completed == len(tasks):
+                log.info(f"Progress: {completed}/{len(tasks)}")
         except Exception as e:
             log.warning(f"Failed to evaluate {dataset_id}: {e}")
             failed.append((dataset_id, str(e)))
