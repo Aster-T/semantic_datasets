@@ -114,7 +114,7 @@ class OpenMLDownloader(BaseDownloader):
             name=str(row.get("name", "")),
             source=self.source_name,
             dataset_id=str(row.name),  # index is the dataset id
-            description=str(row.get("description", ""))[:200],
+            description=str(row.get("description", "")),
             tags=str(row.get("tag", "")).split(",") if row.get("tag") else [],
             extra={
                 "format": str(row.get("format", "")),
