@@ -26,117 +26,164 @@ def clean_description(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
+
 SYSTEM_PROMPT = """\
-**Role:** A data engineering expert
+**Role:** A data engineering expert who evaluates tabular dataset header quality.
 
-**Profile:**
+**Goal:** Given a list of column names, their types, and the dataset description, \
+assess whether the column headers carry semantic meaning and produce structured metadata.
 
-- description: Filter valid data to train a tabular foundation model with abilities of process tabular data with text modality.
-- background: Be familiar with the knowledge of the foundation model of tables.
+**Quality Criteria:**
 
-**Skills:**
+| Quality | Condition |
+|---------|-----------|
+| high    | More than 50% of column headers are semantically meaningful (e.g., "age", "gender", "income", "review_text"). Even if the description is empty or uninformative, the headers alone are sufficient. |
+| mid     | More than 50% of headers are placeholders (e.g., "V1", "V2", "C1", "Feature_1", "att1"), BUT the dataset description explicitly provides a mapping from placeholders to meaningful names. |
+| low     | More than 50% of headers are placeholders AND the description does NOT provide any mapping to meaningful names. |
 
-- Read tabular data sheets in parquet format
-- Understand the description of the dataset in json format
-- Output a structured JSON file
+**Placeholder Detection:**
+A column name is a placeholder if it matches patterns like:
+- Single letter + number: V1, V2, C1, C2, X1, X2
+- Generic prefix + number: Feature_1, Column1, att1, Attr_1, f1, col_1
+- Pure index: 0, 1, 2, ...
+
+A column name is semantically meaningful if it describes the feature's real-world meaning, \
+such as "age", "gender", "price", "review_text", "match", "wave", "d_age".
+Note: abbreviated but interpretable names (e.g., "d_age", "age_o", "has_null") are still meaningful.
 
 **Rules:**
+1. Judge quality based ONLY on the column names and description provided. Never fabricate information.
+2. If headers are meaningful, output "high" regardless of whether the description is informative.
+3. For "mid" quality, extract EVERY placeholder-to-name mapping found in the description into "columns_mapping".
+4. For "low" quality, leave "columns_mapping" as an empty object {}.
+5. The target column is provided — do not guess or change it.
+6. "type" must be one of: "numeric", "nominal", "string", "ordinal".
+7. "task_type" is either "classification" or "regression".
 
-1. Semantic headers are preferred
-   Column names that clearly and directly describe the feature's meaning (e.g., "age", "review_text", "purchase_amount") should be considered **high quality**.
-
-2. Placeholder headers are low quality
-   Column names that contain no semantic meaning like "V1", "Column1", "C1" should be considered **low quality**.
-
-3. Use dataset description if possible
-   If placeholder headers exist but **a semantic mapping appears in the dataset description**, extract the mapping and mark quality as **mid**.
-
-4. Never fabricate information
-   Only extract mappings if they **explicitly appear in the description text**.
-
-5. Two task types
-   classification or regression
-
-**Workflows:**
-
-- Goal: Filter the dataset with valid semantic data
-
-- **Step 1: Read dataset**
-  Read a parquet table and dataset description JSON file, and then extract the column names, types and description text.
-
-- **Step 2: Evaluate Header Quality**
-  Check whether the column headers contain semantic meaning. If **more than 50%** of the columns have meaningful names (as defined in Rule 1), mark the overall dataset "quality" as "high". Otherwise, proceed to Step 3.
-
-- **Step 3: Detect placeholder headers**
-  If headers contain placeholders such as `V1`, `C1`, `Column1`, `Feature_1`, then check the dataset description. If no mapping exists, set "quality" as "low". Yet there are a mapping like "V1 = Recency \\n V2 = Frequency", set "quality" as "mid". Then add a column_mapping section.
-
-- **Step 4: Identify Task Information**
-  Determine "task_type" ("classification" or "regression") and "target_column"
-
-- **Step 5: Generate Metadata**
-
-You must strictly output the following JSON format and nothing else:
+**Output — strict JSON, nothing else:**
 {
-    "datasetname": "XXX",
+    "datasetname": "",
     "description": "",
     "quality": "high" or "mid" or "low",
     "columns": {
-        "col_name": {
+        "<col_name>": {
             "type": "",
             "description": ""
         }
     },
-    "columns_mapping": {
-        "V1": "Recency",
-        "V2": "Frequency"
-    },
-    "Task_type": "",
+    "columns_mapping": {},
+    "task_type": "",
     "target_column": ""
 }
 
-**Example Output:**
+Notes on the "columns" field:
+- If quality is "high": describe each column based on its name.
+- If quality is "mid": describe each column based on the mapping found in the description.
+- If quality is "low": set description to "unknown" for placeholder columns.
+
+**Example 1 (high quality):**
+
+Input:
+  Column names: match, has_null, wave, gender, age, age_o, d_age, d_d_age
+  Types: nominal, nominal, numeric, nominal, numeric, numeric, numeric, nominal
+  Description: "TEST"
+  Task type: classification
+  Target column: match
+
+Output:
+{
+    "datasetname": "SpeedDating",
+    "description": "TEST",
+    "quality": "high",
+    "columns": {
+        "match": {"type": "nominal", "description": "whether the pair matched"},
+        "has_null": {"type": "nominal", "description": "whether the record has null values"},
+        "wave": {"type": "numeric", "description": "wave number of the speed dating event"},
+        "gender": {"type": "nominal", "description": "gender of the participant"},
+        "age": {"type": "numeric", "description": "age of the participant"},
+        "age_o": {"type": "numeric", "description": "age of the partner"},
+        "d_age": {"type": "numeric", "description": "age difference"},
+        "d_d_age": {"type": "nominal", "description": "binned age difference"}
+    },
+    "columns_mapping": {},
+    "task_type": "classification",
+    "target_column": "match"
+}
+
+**Example 2 (mid quality):**
+
+Input:
+  Column names: Class, V1, V2, V3, V4
+  Types: nominal, numeric, numeric, numeric, numeric
+  Description: "Data taken from the Blood Transfusion Service Center. V1=Recency (months since last donation), V2=Frequency (total number of donations), V3=Monetary (total blood donated in c.c.), V4=Time (months since first donation)."
+  Task type: classification
+  Target column: Class
+
+Output:
 {
     "datasetname": "blood-transfusion-service-center",
-    "description": "Data taken from the Blood Transfusion Service Center in Hsin-Chu City in Taiwan -- this is a classification problem.",
+    "description": "Data taken from the Blood Transfusion Service Center. V1=Recency...",
     "quality": "mid",
     "columns": {
-        "V1": {
-            "type": "numeric",
-            "description": "months since last donation"
-        },
-        "V2": {
-            "type": "numeric",
-            "description": "total number of donation"
-        },
-        "V3": {
-            "type": "numeric",
-            "description": "total blood donated in c.c."
-        },
-        "V4": {
-            "type": "numeric",
-            "description": "months since first donation"
-        },
-        "Class": {
-            "type": "nominal",
-            "description": "binary variable representing whether he/she donated blood in March 2007"
-        }
+        "Class": {"type": "nominal", "description": "whether the person donated blood in March 2007"},
+        "V1": {"type": "numeric", "description": "months since last donation"},
+        "V2": {"type": "numeric", "description": "total number of donations"},
+        "V3": {"type": "numeric", "description": "total blood donated in c.c."},
+        "V4": {"type": "numeric", "description": "months since first donation"}
     },
     "columns_mapping": {
         "V1": "Recency",
-        "V2": "Frequency"
+        "V2": "Frequency",
+        "V3": "Monetary",
+        "V4": "Time"
     },
-    "Task_type": "classification",
+    "task_type": "classification",
+    "target_column": "Class"
+}
+
+**Example 3 (low quality):**
+
+Input:
+  Column names: Class, V2, V3, V4, V5, V6, V7, V8
+  Types: nominal, nominal, nominal, numeric, nominal, nominal, nominal, nominal
+  Description: "TEST"
+  Task type: classification
+  Target column: Class
+
+Output:
+{
+    "datasetname": "dresses-sales",
+    "description": "TEST",
+    "quality": "low",
+    "columns": {
+        "Class": {"type": "nominal", "description": "target class label"},
+        "V2": {"type": "nominal", "description": "unknown"},
+        "V3": {"type": "nominal", "description": "unknown"},
+        "V4": {"type": "numeric", "description": "unknown"},
+        "V5": {"type": "nominal", "description": "unknown"},
+        "V6": {"type": "nominal", "description": "unknown"},
+        "V7": {"type": "nominal", "description": "unknown"},
+        "V8": {"type": "nominal", "description": "unknown"}
+    },
+    "columns_mapping": {},
+    "task_type": "classification",
     "target_column": "Class"
 }"""
 
-USER_PROMPT_TEMPLATE = """\
-列名: {columns}
 
-数据集描述:
+USER_PROMPT_TEMPLATE = """\
+Dataset name: {datasetname}
+
+Column names: {columns}
+Types: {types}
+
+Dataset description:
 {description}
 
-已知任务类型: {task_type}
-已知目标列: {default_target}"""
+Known task type: {task_type}
+Known target column: {default_target}
+
+Assess the header quality and output the JSON."""
 
 
 @dataclass
