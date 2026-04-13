@@ -97,10 +97,11 @@ def _read_dataset_dir(ds_dir: Path, source: str, dataset_id: str) -> dict | None
     }
 
 
-def save_result(result: EvalResult, output_dir: Path) -> None:
+def save_result(result: EvalResult, output_dir: Path, model: str) -> None:
     """Append one evaluation result to the output JSONL file."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / f"{result.source}_eval.jsonl"
+    model_tag = model.replace("/", "_")
+    output_file = output_dir / f"{result.source}_{model_tag}_eval.jsonl"
     entry = {
         "dataset_id": result.dataset_id,
         "source": result.source,
@@ -183,7 +184,8 @@ async def async_main():
     )
 
     output_dir = DATA_DIR / "eval"
-    progress_path = output_dir / f"{source}_eval_progress.json"
+    model_tag = args.model.replace("/", "_")
+    progress_path = output_dir / f"{source}_{model_tag}_eval_progress.json"
     done = load_eval_progress(progress_path)
 
     datasets = discover_datasets(source)
@@ -211,7 +213,7 @@ async def async_main():
     for dataset_id, task in tasks.items():
         try:
             result = await task
-            save_result(result, output_dir)
+            save_result(result, output_dir, args.model)
             done.add(dataset_id)
             completed += 1
             if completed % 50 == 0 or completed == len(tasks):
@@ -226,7 +228,7 @@ async def async_main():
 
     log.info(f"Done. Evaluated: {completed}, Failed: {len(failed)}")
     if failed:
-        fail_path = output_dir / f"{source}_eval_failed.json"
+        fail_path = output_dir / f"{source}_{model_tag}_eval_failed.json"
         fail_path.write_text(
             json.dumps([{"id": fid, "error": err} for fid, err in failed],
                        indent=2, ensure_ascii=False)
