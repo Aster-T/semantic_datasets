@@ -7,13 +7,18 @@ PORT="${PORT:-8000}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-2}"
 
 # Conservative defaults for 2 x 48GB Ada 6000.
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
-MAX_NUM_SEQS="${MAX_NUM_SEQS:-8}"
-MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-4096}"
-GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.85}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-4}"
+MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-2048}"
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.80}"
 KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8}"
-CPU_OFFLOAD_GB="${CPU_OFFLOAD_GB:-8}"
+CPU_OFFLOAD_GB="${CPU_OFFLOAD_GB:-12}"
+SWAP_SPACE="${SWAP_SPACE:-16}"
 ENABLE_PREFIX_CACHING="${ENABLE_PREFIX_CACHING:-0}"
+ENFORCE_EAGER="${ENFORCE_EAGER:-1}"
+DISABLE_CUSTOM_ALL_REDUCE="${DISABLE_CUSTOM_ALL_REDUCE:-1}"
+ENABLE_THROUGHPUT_MODE="${ENABLE_THROUGHPUT_MODE:-0}"
+VLLM_OPT_LEVEL="${VLLM_OPT_LEVEL:-}"
 
 CMD=(
     vllm serve "$MODEL"
@@ -26,14 +31,29 @@ CMD=(
     --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION"
     --kv-cache-dtype "$KV_CACHE_DTYPE"
     --cpu-offload-gb "$CPU_OFFLOAD_GB"
-    --performance-mode throughput
-    -O3
+    --swap-space "$SWAP_SPACE"
     --uvicorn-log-level warning
     --language-model-only
 )
 
 if [ "$ENABLE_PREFIX_CACHING" = "1" ]; then
     CMD+=(--enable-prefix-caching)
+fi
+
+if [ "$ENFORCE_EAGER" = "1" ]; then
+    CMD+=(--enforce-eager)
+fi
+
+if [ "$DISABLE_CUSTOM_ALL_REDUCE" = "1" ]; then
+    CMD+=(--disable-custom-all-reduce)
+fi
+
+if [ "$ENABLE_THROUGHPUT_MODE" = "1" ]; then
+    CMD+=(--performance-mode throughput)
+fi
+
+if [ -n "$VLLM_OPT_LEVEL" ]; then
+    CMD+=("$VLLM_OPT_LEVEL")
 fi
 
 "${CMD[@]}"
