@@ -3,7 +3,9 @@
     "allow": [
       "Bash(ls -lh d:/Projects/semantic_datasets/src/*.py)",
       "Read(//d/Projects/semantic_datasets/**)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(python -c \"import openml; ds = openml.datasets.get_dataset\\(1489, download_data=False, download_qualities=False\\); print\\('default_target:', ds.default_target_attribute\\); print\\('format:', ds.format\\); print\\([a for a in dir\\(ds\\) if not a.startswith\\('_'\\)]\\)\")",
+      "Bash(D:/miniconda3/envs/dl-py3.12/python.exe -c ':*)"
     ]
   }
 }

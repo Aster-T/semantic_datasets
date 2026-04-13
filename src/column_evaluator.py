@@ -133,7 +133,10 @@ USER_PROMPT_TEMPLATE = """\
 列名: {columns}
 
 数据集描述:
-{description}"""
+{description}
+
+已知任务类型: {task_type}
+已知目标列: {default_target}"""
 
 
 @dataclass
@@ -176,11 +179,15 @@ class ColumnEvaluator:
         description: str,
         dataset_id: str = "",
         source: str = "",
+        task_type: str = "",
+        default_target: str = "",
     ) -> EvalResult:
         """Evaluate column quality and extract semantic mappings if possible."""
         user_prompt = USER_PROMPT_TEMPLATE.format(
             columns=json.dumps(columns, ensure_ascii=False),
             description=clean_description(description),
+            task_type=task_type or "unknown",
+            default_target=default_target or "unknown",
         )
 
         response = self._client.chat.completions.create(
@@ -217,11 +224,15 @@ class ColumnEvaluator:
         description: str,
         dataset_id: str = "",
         source: str = "",
+        task_type: str = "",
+        default_target: str = "",
     ) -> EvalResult:
         """Async version of evaluate for concurrent execution."""
         user_prompt = USER_PROMPT_TEMPLATE.format(
             columns=json.dumps(columns, ensure_ascii=False),
             description=clean_description(description),
+            task_type=task_type or "unknown",
+            default_target=default_target or "unknown",
         )
 
         response = await self._async_client.chat.completions.create(

@@ -58,6 +58,23 @@ class OpenMLDownloader(BaseDownloader):
             },
         )
 
+    @staticmethod
+    def _infer_task_type(dataset_id: int) -> str:
+        """Infer task type from OpenML tasks associated with this dataset."""
+        try:
+            tasks = openml.tasks.list_tasks(
+                data_id=dataset_id, output_format="dataframe"
+            )
+            if tasks is not None and "task_type" in tasks.columns:
+                task_types = tasks["task_type"].unique().tolist()
+                if "Supervised Regression" in task_types:
+                    return "regression"
+                if "Supervised Classification" in task_types:
+                    return "classification"
+        except Exception:
+            pass
+        return ""
+
     def download(self, dataset_id: str, dest_dir: Path | None = None) -> Path:
         dest = self._resolve_dest(dataset_id, dest_dir)
 
@@ -70,6 +87,8 @@ class OpenMLDownloader(BaseDownloader):
         out_path = dest / f"{ds.name}.parquet"
         df.to_parquet(out_path, index=False)
 
+        task_type = self._infer_task_type(int(dataset_id))
+
         # Save metadata
         metadata = {
             "name": ds.name,
@@ -78,6 +97,7 @@ class OpenMLDownloader(BaseDownloader):
             "description": ds.description or "",
             "url": ds.openml_url or "",
             "default_target": ds.default_target_attribute or "",
+            "task_type": task_type,
             "tags": list(ds.tag) if ds.tag else [],
         }
         meta_path = dest / "metadata.json"

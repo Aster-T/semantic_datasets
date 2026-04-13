@@ -79,13 +79,17 @@ def _read_dataset_dir(ds_dir: Path, source: str, dataset_id: str) -> dict | None
         log.warning(f"Cannot read parquet {parquet_files[0]}: {e}")
         return None
 
-    # Read description from metadata.json
+    # Read metadata from metadata.json
     description = ""
+    task_type = ""
+    default_target = ""
     meta_path = ds_dir / "metadata.json"
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             description = meta.get("description", "")
+            task_type = meta.get("task_type", "")
+            default_target = meta.get("default_target", "")
         except Exception:
             pass
 
@@ -94,6 +98,8 @@ def _read_dataset_dir(ds_dir: Path, source: str, dataset_id: str) -> dict | None
         "source": source,
         "columns": columns,
         "description": description,
+        "task_type": task_type,
+        "default_target": default_target,
     }
 
 
@@ -172,6 +178,8 @@ async def evaluate_one(
             description=ds["description"],
             dataset_id=ds["dataset_id"],
             source=ds["source"],
+            task_type=ds.get("task_type", ""),
+            default_target=ds.get("default_target", ""),
         )
 
 
