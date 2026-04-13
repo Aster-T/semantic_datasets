@@ -184,7 +184,7 @@ Output:
 
 
 USER_PROMPT_TEMPLATE = """\
-Dataset name: {datasetname}
+Dataset name: {dataset_name}
 
 Column names: {columns}
 Types: {types}
