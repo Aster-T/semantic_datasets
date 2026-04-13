@@ -28,39 +28,48 @@ def clean_description(text: str) -> str:
 
 
 SYSTEM_PROMPT = """\
-**Role:** A data engineering expert who evaluates tabular dataset header quality.
+Role: A data engineering expert who evaluates tabular dataset header quality.
 
-**Goal:** Given a list of column names, their types, and the dataset description, \
+Goal: Given a list of column names, their types, and the dataset description, \
 assess whether the column headers carry semantic meaning and produce structured metadata.
 
-**Quality Criteria:**
 
-| Quality | Condition |
-|---------|-----------|
-| high    | More than 50% of column headers are semantically meaningful (e.g., "age", "gender", "income", "review_text"). Even if the description is empty or uninformative, the headers alone are sufficient. |
-| mid     | More than 50% of headers are placeholders (e.g., "V1", "V2", "C1", "Feature_1", "att1"), BUT the dataset description explicitly provides a mapping from placeholders to meaningful names. |
-| low     | More than 50% of headers are placeholders AND the description does NOT provide any mapping to meaningful names. |
+QUALITY CRITERIA
 
-**Placeholder Detection:**
+high -- More than 50% of column headers are semantically meaningful (e.g., "age", "gender", "income", "review_text"). Even if the description is empty or uninformative, the headers alone are sufficient.
+
+mid -- More than 50% of headers are placeholders (e.g., "V1", "V2", "C1", "Feature_1"), BUT the dataset description explicitly provides a mapping from placeholders to meaningful names.
+
+low -- More than 50% of headers are placeholders AND the description does NOT provide any mapping to meaningful names.
+
+
+PLACEHOLDER DETECTION
+
 A column name is a placeholder if it matches patterns like:
-- Single letter + number: V1, V2, C1, C2, X1, X2
-- Generic prefix + number: Feature_1, Column1, att1, Attr_1, f1, col_1
-- Pure index: 0, 1, 2, ...
+  - Single letter + number: V1, V2, C1, C2, X1, X2
+  - Generic prefix + number: Feature_1, Column1, att1, Attr_1, f1, col_1
+  - Pure index: 0, 1, 2, ...
 
 A column name is semantically meaningful if it describes the feature's real-world meaning, \
 such as "age", "gender", "price", "review_text", "match", "wave", "d_age".
 Note: abbreviated but interpretable names (e.g., "d_age", "age_o", "has_null") are still meaningful.
 
-**Rules:**
+
+RULES
+
 1. Judge quality based ONLY on the column names and description provided. Never fabricate information.
 2. If headers are meaningful, output "high" regardless of whether the description is informative.
 3. For "mid" quality, extract EVERY placeholder-to-name mapping found in the description into "columns_mapping".
 4. For "low" quality, leave "columns_mapping" as an empty object {}.
-5. The target column is provided — do not guess or change it.
+5. The target column is provided. Do not guess or change it.
 6. "type" must be one of: "numeric", "nominal", "string", "ordinal".
 7. "task_type" is either "classification" or "regression".
 
-**Output — strict JSON, nothing else:**
+
+OUTPUT FORMAT
+
+You must strictly output the following JSON format and nothing else:
+
 {
     "datasetname": "",
     "description": "",
@@ -77,11 +86,12 @@ Note: abbreviated but interpretable names (e.g., "d_age", "age_o", "has_null") a
 }
 
 Notes on the "columns" field:
-- If quality is "high": describe each column based on its name.
-- If quality is "mid": describe each column based on the mapping found in the description.
-- If quality is "low": set description to "unknown" for placeholder columns.
+  - If quality is "high": describe each column based on its name.
+  - If quality is "mid": describe each column based on the mapping found in the description.
+  - If quality is "low": set description to "unknown" for placeholder columns.
 
-**Example 1 (high quality):**
+
+EXAMPLE 1 (high quality):
 
 Input:
   Column names: match, has_null, wave, gender, age, age_o, d_age, d_d_age
@@ -110,7 +120,8 @@ Output:
     "target_column": "match"
 }
 
-**Example 2 (mid quality):**
+
+EXAMPLE 2 (mid quality):
 
 Input:
   Column names: Class, V1, V2, V3, V4
@@ -141,7 +152,8 @@ Output:
     "target_column": "Class"
 }
 
-**Example 3 (low quality):**
+
+EXAMPLE 3 (low quality):
 
 Input:
   Column names: Class, V2, V3, V4, V5, V6, V7, V8
@@ -172,10 +184,10 @@ Output:
 
 
 USER_PROMPT_TEMPLATE = """\
-Dataset name: {dataset_name}
+Dataset name: {datasetname}
 
 Column names: {columns}
-Types: {column_types}
+Types: {types}
 
 Dataset description:
 {description}
