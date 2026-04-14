@@ -12,7 +12,9 @@ from typing import Any, Iterator
 import numpy as np
 import openml
 import pandas as pd
+import pyarrow.parquet as pq
 import scipy.sparse
+from openml.datasets.functions import _get_cache_directory, _get_dataset_arff, _get_dataset_parquet
 
 from base import BaseDownloader, DatasetInfo
 
@@ -206,8 +208,9 @@ class OpenMLDownloader(BaseDownloader):
         dest = self._resolve_dest(dataset_id, dest_dir)
 
         ds = openml.datasets.get_dataset(
-            int(dataset_id), download_data=True, download_qualities=False
+            int(dataset_id), download_data=False, download_qualities=False
         )
+        self._download_dataset_assets(ds)
         out_path = dest / "table.parquet"
         download_info = self._save_dataset_parquet(ds, out_path)
 
@@ -372,6 +375,58 @@ class OpenMLDownloader(BaseDownloader):
                 return row.iloc[0]
             return row
         return None
+
+    def _download_dataset_assets(self, ds: Any) -> None:
+        if getattr(ds, "parquet_file", None) or getattr(ds, "data_file", None):
+            return
+
+        parquet_url = _normalize_str(getattr(ds, "_parquet_url", ""))
+        if parquet_url:
+            try:
+                parquet_file = _get_dataset_parquet(ds)
+                if parquet_file is not None:
+                    self._validate_openml_parquet(parquet_file)
+                    ds.parquet_file = str(parquet_file)
+                    ds.data_file = None
+                    return
+                log.warning(
+                    "OpenML parquet unavailable for dataset %s; falling back to ARFF.",
+                    ds.dataset_id,
+                )
+            except Exception as exc:
+                self._cleanup_partial_openml_parquet(ds)
+                ds.parquet_file = None
+                log.warning(
+                    "OpenML parquet download failed for dataset %s (%s); falling back to ARFF.",
+                    ds.dataset_id,
+                    exc,
+                )
+
+        arff_file = _get_dataset_arff(ds)
+        ds.data_file = str(arff_file)
+        ds.parquet_file = None
+
+    @staticmethod
+    def _validate_openml_parquet(parquet_file: Path) -> None:
+        try:
+            pq.read_schema(parquet_file)
+        except Exception as exc:
+            raise ValueError(f"Invalid OpenML parquet cache file: {parquet_file}") from exc
+
+    @staticmethod
+    def _cleanup_partial_openml_parquet(ds: Any) -> None:
+        try:
+            cache_dir = _get_cache_directory(ds)
+        except Exception:
+            return
+
+        candidates = [
+            cache_dir / f"dataset_{ds.dataset_id}.pq",
+            cache_dir / "dataset.pq",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                candidate.unlink()
 
     def _save_dataset_parquet(self, ds, out_path: Path) -> dict[str, str]:
         source_parquet = _normalize_str(getattr(ds, "parquet_file", ""))
