@@ -7,6 +7,7 @@ dependencies = [
     "openml>=0.14",
     "kaggle>=1.6",
     "pandas>=2.0",
+    "scipy>=1.8",
     "pyarrow>=14.0",
     "rich>=13.0",
     "click>=8.0",

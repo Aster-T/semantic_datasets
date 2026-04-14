@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
+import numpy as np
 import openml
 import pandas as pd
+import scipy.sparse
 
 from base import BaseDownloader, DatasetInfo
 
@@ -97,6 +100,27 @@ def _normalize_nested_value(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+@contextmanager
+def _openml_factorize_list_compat() -> Iterator[None]:
+    """Patch pandas.factorize so OpenML 0.15 works with pandas 3 list inputs."""
+    original_factorize = pd.factorize
+    if getattr(original_factorize, "_semantic_datasets_openml_compat", False):
+        yield
+        return
+
+    def compat_factorize(values: Any, *args: Any, **kwargs: Any):
+        if isinstance(values, list):
+            values = np.asarray(values, dtype=object)
+        return original_factorize(values, *args, **kwargs)
+
+    setattr(compat_factorize, "_semantic_datasets_openml_compat", True)
+    pd.factorize = compat_factorize
+    try:
+        yield
+    finally:
+        pd.factorize = original_factorize
 
 
 class OpenMLDownloader(BaseDownloader):
@@ -360,17 +384,32 @@ class OpenMLDownloader(BaseDownloader):
                     "source_parquet": str(source_path),
                 }
 
-        df, *_ = ds.get_data(
-            target=None,
-            include_row_id=True,
-            include_ignore_attribute=True,
-        )
+        df = self._load_dataset_frame(ds)
         df = self._normalize_dataframe_for_parquet(df, dataset_id=str(ds.dataset_id))
         df.to_parquet(out_path, index=False)
         return {
             "strategy": "rewritten_from_dataframe",
             "source_parquet": source_parquet,
         }
+
+    def _load_dataset_frame(self, ds: Any) -> pd.DataFrame:
+        with _openml_factorize_list_compat():
+            data, _, attribute_names = ds._load_data()
+
+        if scipy.sparse.issparse(data):
+            dtype = getattr(data, "dtype", np.dtype("float32"))
+            dense_bytes = data.shape[0] * data.shape[1] * dtype.itemsize
+            log.info(
+                "Dataset %s converting sparse OpenML matrix to dense dataframe for parquet export (~%.1f MB).",
+                ds.dataset_id,
+                dense_bytes / (1024 * 1024),
+            )
+            return pd.DataFrame(data.toarray(), columns=attribute_names)
+
+        if isinstance(data, pd.DataFrame):
+            return data
+
+        return pd.DataFrame(data, columns=attribute_names)
 
     def _normalize_dataframe_for_parquet(
         self,
@@ -379,10 +418,15 @@ class OpenMLDownloader(BaseDownloader):
         dataset_id: str,
     ) -> pd.DataFrame:
         converted = df.copy()
+        densified_columns: list[str] = []
         rewritten_columns: list[str] = []
 
         for column in converted.columns:
             series = converted[column]
+            if isinstance(series.dtype, pd.SparseDtype):
+                converted[column] = series.sparse.to_dense()
+                densified_columns.append(str(column))
+                series = converted[column]
             if series.dtype != "object":
                 continue
             if not series.map(self._needs_json_serialization).any():
@@ -395,6 +439,12 @@ class OpenMLDownloader(BaseDownloader):
             )
             rewritten_columns.append(str(column))
 
+        if densified_columns:
+            log.info(
+                "Dataset %s densified sparse columns for parquet compatibility: %s",
+                dataset_id,
+                ", ".join(densified_columns),
+            )
         if rewritten_columns:
             log.info(
                 "Dataset %s rewrote nested columns to JSON strings for parquet compatibility: %s",

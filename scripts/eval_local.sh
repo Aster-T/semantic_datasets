@@ -3,7 +3,7 @@ set -euo pipefail
 
 SOURCE="${1:-openml}"
 MODEL="${2:-Qwen/Qwen3.5-35B-A3B}"
-CONCURRENCY="${3:-8}"
+CONCURRENCY="${3:-4}"
 LIMIT="${4:-}"
 BASE_URL="${LOCAL_BASE_URL:-http://127.0.0.1:8000/v1}"
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
