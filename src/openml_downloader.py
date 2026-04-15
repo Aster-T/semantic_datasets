@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-import numpy as np
 import openml
 import pandas as pd
-import pyarrow.parquet as pq
-import scipy.sparse
-from openml.datasets.functions import _get_cache_directory, _get_dataset_arff, _get_dataset_parquet
+from openml.datasets.functions import _get_dataset_arff
 
 from base import BaseDownloader, DatasetInfo
 
@@ -83,46 +79,6 @@ def _json_ready(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
-
-
-def _normalize_nested_value(value: Any) -> Any:
-    if _is_missing(value):
-        return None
-    if isinstance(value, dict):
-        return {str(key): _normalize_nested_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_normalize_nested_value(item) for item in value]
-    if hasattr(value, "item") and not isinstance(value, (str, bytes)):
-        try:
-            return _normalize_nested_value(value.item())
-        except (AttributeError, TypeError, ValueError):
-            pass
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
-
-
-@contextmanager
-def _openml_factorize_list_compat() -> Iterator[None]:
-    """Patch pandas.factorize so OpenML 0.15 works with pandas 3 list inputs."""
-    original_factorize = pd.factorize
-    if getattr(original_factorize, "_semantic_datasets_openml_compat", False):
-        yield
-        return
-
-    def compat_factorize(values: Any, *args: Any, **kwargs: Any):
-        if isinstance(values, list):
-            values = np.asarray(values, dtype=object)
-        return original_factorize(values, *args, **kwargs)
-
-    setattr(compat_factorize, "_semantic_datasets_openml_compat", True)
-    pd.factorize = compat_factorize
-    try:
-        yield
-    finally:
-        pd.factorize = original_factorize
 
 
 class OpenMLDownloader(BaseDownloader):
@@ -205,14 +161,13 @@ class OpenMLDownloader(BaseDownloader):
         return ""
 
     def download(self, dataset_id: str, dest_dir: Path | None = None) -> Path:
-        dest = self._resolve_dest(dataset_id, dest_dir)
+        dest = self._resolve_openml_dest(dataset_id, dest_dir)
 
         ds = openml.datasets.get_dataset(
             int(dataset_id), download_data=False, download_qualities=False
         )
         self._download_dataset_assets(ds)
-        out_path = dest / "table.parquet"
-        download_info = self._save_dataset_parquet(ds, out_path)
+        download_info = self._save_dataset_arff(ds, dest / "table.arff")
 
         task_type = self._infer_task_type(int(dataset_id))
         listing_row = self._get_listing_row(dataset_id)
@@ -247,10 +202,11 @@ class OpenMLDownloader(BaseDownloader):
             "paper_url": _normalize_str(getattr(ds, "paper_url", "")),
             "update_comment": _normalize_str(getattr(ds, "update_comment", "")),
             "md5_checksum": _normalize_str(getattr(ds, "md5_checksum", "")),
-            "local_table_file": out_path.name,
-            "storage_format": "parquet",
+            "local_table_file": download_info["local_file"],
+            "storage_format": download_info["storage_format"],
+            "source_preference": "arff",
             "download_strategy": download_info["strategy"],
-            "openml_cached_parquet": download_info["source_parquet"],
+            "openml_cached_arff": download_info["source_arff"],
             "num_instances": self._row_int(listing_row, "NumberOfInstances"),
             "num_features": self._row_int(listing_row, "NumberOfFeatures"),
             "num_missing_values": self._row_int(listing_row, "NumberOfMissingValues"),
@@ -376,144 +332,38 @@ class OpenMLDownloader(BaseDownloader):
             return row
         return None
 
-    def _download_dataset_assets(self, ds: Any) -> None:
-        if getattr(ds, "parquet_file", None) or getattr(ds, "data_file", None):
-            return
+    def _resolve_openml_dest(
+        self,
+        dataset_id: str,
+        dest_dir: Path | None,
+    ) -> Path:
+        if dest_dir is None:
+            dest_dir = self.data_dir / self.source_name / "arff" / dataset_id
+        return self._resolve_dest(dataset_id, dest_dir)
 
-        parquet_url = _normalize_str(getattr(ds, "_parquet_url", ""))
-        if parquet_url:
-            try:
-                parquet_file = _get_dataset_parquet(ds)
-                if parquet_file is not None:
-                    self._validate_openml_parquet(parquet_file)
-                    ds.parquet_file = str(parquet_file)
-                    ds.data_file = None
-                    return
-                log.warning(
-                    "OpenML parquet unavailable for dataset %s; falling back to ARFF.",
-                    ds.dataset_id,
-                )
-            except Exception as exc:
-                self._cleanup_partial_openml_parquet(ds)
-                ds.parquet_file = None
-                log.warning(
-                    "OpenML parquet download failed for dataset %s (%s); falling back to ARFF.",
-                    ds.dataset_id,
-                    exc,
-                )
+    def _download_dataset_assets(self, ds: Any) -> None:
+        if getattr(ds, "data_file", None):
+            return
 
         arff_file = _get_dataset_arff(ds)
         ds.data_file = str(arff_file)
-        ds.parquet_file = None
 
-    @staticmethod
-    def _validate_openml_parquet(parquet_file: Path) -> None:
-        try:
-            pq.read_schema(parquet_file)
-        except Exception as exc:
-            raise ValueError(f"Invalid OpenML parquet cache file: {parquet_file}") from exc
+    def _save_dataset_arff(self, ds: Any, out_path: Path) -> dict[str, str]:
+        source_arff = _normalize_str(getattr(ds, "data_file", ""))
+        if not source_arff:
+            raise ValueError(f"OpenML ARFF file is unavailable for dataset {ds.dataset_id}")
 
-    @staticmethod
-    def _cleanup_partial_openml_parquet(ds: Any) -> None:
-        try:
-            cache_dir = _get_cache_directory(ds)
-        except Exception:
-            return
+        source_path = Path(source_arff)
+        if not source_path.exists():
+            raise FileNotFoundError(f"OpenML ARFF cache file does not exist: {source_path}")
 
-        candidates = [
-            cache_dir / f"dataset_{ds.dataset_id}.pq",
-            cache_dir / "dataset.pq",
-        ]
-        for candidate in candidates:
-            if candidate.exists():
-                candidate.unlink()
-
-    def _save_dataset_parquet(self, ds, out_path: Path) -> dict[str, str]:
-        source_parquet = _normalize_str(getattr(ds, "parquet_file", ""))
-        if source_parquet:
-            source_path = Path(source_parquet)
-            if source_path.exists():
-                shutil.copy2(source_path, out_path)
-                return {
-                    "strategy": "copied_openml_parquet",
-                    "source_parquet": str(source_path),
-                }
-
-        df = self._load_dataset_frame(ds)
-        df = self._normalize_dataframe_for_parquet(df, dataset_id=str(ds.dataset_id))
-        df.to_parquet(out_path, index=False)
+        shutil.copy2(source_path, out_path)
         return {
-            "strategy": "rewritten_from_dataframe",
-            "source_parquet": source_parquet,
+            "strategy": "copied_openml_arff",
+            "source_arff": str(source_path),
+            "local_file": out_path.name,
+            "storage_format": "arff",
         }
-
-    def _load_dataset_frame(self, ds: Any) -> pd.DataFrame:
-        with _openml_factorize_list_compat():
-            data, _, attribute_names = ds._load_data()
-
-        if scipy.sparse.issparse(data):
-            dtype = getattr(data, "dtype", np.dtype("float32"))
-            dense_bytes = data.shape[0] * data.shape[1] * dtype.itemsize
-            log.info(
-                "Dataset %s converting sparse OpenML matrix to dense dataframe for parquet export (~%.1f MB).",
-                ds.dataset_id,
-                dense_bytes / (1024 * 1024),
-            )
-            return pd.DataFrame(data.toarray(), columns=attribute_names)
-
-        if isinstance(data, pd.DataFrame):
-            return data
-
-        return pd.DataFrame(data, columns=attribute_names)
-
-    def _normalize_dataframe_for_parquet(
-        self,
-        df: pd.DataFrame,
-        *,
-        dataset_id: str,
-    ) -> pd.DataFrame:
-        converted = df.copy()
-        densified_columns: list[str] = []
-        rewritten_columns: list[str] = []
-
-        for column in converted.columns:
-            series = converted[column]
-            if isinstance(series.dtype, pd.SparseDtype):
-                converted[column] = series.sparse.to_dense()
-                densified_columns.append(str(column))
-                series = converted[column]
-            if series.dtype != "object":
-                continue
-            if not series.map(self._needs_json_serialization).any():
-                continue
-
-            converted[column] = series.map(
-                lambda value: None
-                if _is_missing(value)
-                else json.dumps(_normalize_nested_value(value), ensure_ascii=False)
-            )
-            rewritten_columns.append(str(column))
-
-        if densified_columns:
-            log.info(
-                "Dataset %s densified sparse columns for parquet compatibility: %s",
-                dataset_id,
-                ", ".join(densified_columns),
-            )
-        if rewritten_columns:
-            log.info(
-                "Dataset %s rewrote nested columns to JSON strings for parquet compatibility: %s",
-                dataset_id,
-                ", ".join(rewritten_columns),
-            )
-
-        return converted
-
-    @staticmethod
-    def _needs_json_serialization(value: Any) -> bool:
-        if _is_missing(value):
-            return False
-        return isinstance(value, (list, tuple, set, dict))
 
     @staticmethod
     def _row_int(row: pd.Series | None, key: str) -> int | None:

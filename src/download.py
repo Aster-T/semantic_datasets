@@ -17,20 +17,20 @@ log = logging.getLogger(__name__)
 DATA_DIR = Path("./data")
 
 
-def progress_file(source: str) -> Path:
-    return DATA_DIR / f"{source}_progress.json"
+def progress_file(progress_key: str) -> Path:
+    return DATA_DIR / f"{progress_key}_progress.json"
 
 
-def load_progress(source: str) -> set[str]:
+def load_progress(progress_key: str) -> set[str]:
     """Load already-downloaded dataset IDs from progress file."""
-    pf = progress_file(source)
+    pf = progress_file(progress_key)
     if pf.exists():
         return set(json.loads(pf.read_text()))
     return set()
 
 
-def save_progress(source: str, done: set[str]) -> None:
-    pf = progress_file(source)
+def save_progress(progress_key: str, done: set[str]) -> None:
+    pf = progress_file(progress_key)
     pf.parent.mkdir(parents=True, exist_ok=True)
     pf.write_text(json.dumps(sorted(done)))
 
@@ -86,9 +86,13 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
     source = args.source
+    progress_key = source
+    log_source = source
 
     if source == "openml":
         downloader = OpenMLDownloader(data_dir=DATA_DIR)
+        progress_key = "openml_arff"
+        log_source = "openml/arff"
         all_ids = get_all_openml_ids(downloader)
     elif source == "kaggle":
         downloader = KaggleDownloader(data_dir=DATA_DIR)
@@ -96,18 +100,18 @@ def main():
     else:
         raise ValueError(f"Unknown source: {source!r}. Use 'openml' or 'kaggle'.")
 
-    done = load_progress(source)
+    done = load_progress(progress_key)
     remaining = [did for did in all_ids if did not in done]
-    log.info(f"[{source}] Already downloaded: {len(done)}, remaining: {len(remaining)}")
+    log.info(f"[{log_source}] Already downloaded: {len(done)}, remaining: {len(remaining)}")
 
     failed: list[tuple[str, str]] = []
 
     for i, dataset_id in enumerate(remaining, 1):
-        log.info(f"[{i}/{len(remaining)}] Downloading {source} dataset {dataset_id} ...")
+        log.info(f"[{i}/{len(remaining)}] Downloading {log_source} dataset {dataset_id} ...")
         try:
             downloader.download(dataset_id)
             done.add(dataset_id)
-            save_progress(source, done)
+            save_progress(progress_key, done)
         except Exception as e:
             log.warning(f"Failed to download dataset {dataset_id}: {e}")
             failed.append((dataset_id, str(e)))
@@ -115,7 +119,7 @@ def main():
 
     log.info(f"Done. Downloaded: {len(done)}, Failed: {len(failed)}")
     if failed:
-        fail_path = DATA_DIR / f"{source}_failed.json"
+        fail_path = DATA_DIR / f"{progress_key}_failed.json"
         fail_path.write_text(
             json.dumps([{"id": fid, "error": err} for fid, err in failed],
                        indent=2, ensure_ascii=False)

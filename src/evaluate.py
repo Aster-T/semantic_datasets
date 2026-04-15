@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -23,6 +24,10 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 DATA_DIR = Path("./data")
+ARFF_ATTRIBUTE_RE = re.compile(
+    r"^\s*@attribute\s+(?P<name>'(?:\\.|[^'])*'|\"(?:\\.|[^\"])*\"|[^\s]+)\s+(?P<type>.+?)\s*$",
+    re.IGNORECASE,
+)
 
 
 def _arrow_type_to_semantic_type(field_type) -> str:
@@ -59,6 +64,76 @@ def _read_parquet_schema(parquet_path: Path) -> tuple[list[str], list[str]]:
     schema = pq.read_schema(parquet_path)
     columns = [field.name for field in schema]
     column_types = [_arrow_type_to_semantic_type(field.type) for field in schema]
+    return columns, column_types
+
+
+def _arff_type_to_semantic_type(attr_type: str) -> str:
+    normalized = attr_type.strip().lower()
+    if normalized.startswith("{"):
+        return "nominal"
+    if any(token in normalized for token in ("numeric", "real", "integer", "int", "float", "double", "decimal")):
+        return "numeric"
+    if any(token in normalized for token in ("date", "time")):
+        return "ordinal"
+    if "string" in normalized:
+        return "string"
+    return "string"
+
+
+def _read_text_lines_best_effort(path: Path) -> list[str]:
+    for encoding in ("utf-8", "utf-8-sig", "latin-1"):
+        try:
+            return path.read_text(encoding=encoding).splitlines()
+        except UnicodeDecodeError:
+            continue
+    return path.read_text(encoding="utf-8", errors="replace").splitlines()
+
+
+def _parse_arff_attribute_line(line: str) -> tuple[str, str]:
+    match = ARFF_ATTRIBUTE_RE.match(line)
+    if not match:
+        payload = re.sub(r"^\s*@attribute\s+", "", line, flags=re.IGNORECASE).strip()
+        if not payload:
+            raise ValueError(f"Unparseable ARFF attribute line: {line}")
+        if payload[:1] in {"'", '"'}:
+            quote = payload[0]
+            end = payload.find(quote, 1)
+            if end == -1:
+                raise ValueError(f"Unparseable ARFF attribute line: {line}")
+            raw_name = payload[1:end]
+            attr_type = payload[end + 1 :].strip()
+        else:
+            parts = payload.split(None, 1)
+            if len(parts) != 2:
+                raise ValueError(f"Unparseable ARFF attribute line: {line}")
+            raw_name, attr_type = parts
+        return raw_name.strip(), attr_type.strip()
+
+    raw_name = match.group("name").strip()
+    attr_type = match.group("type").strip()
+    if raw_name[:1] in {"'", '"'} and raw_name[-1:] == raw_name[:1]:
+        raw_name = raw_name[1:-1]
+    return raw_name, attr_type
+
+
+def _read_arff_schema(arff_path: Path) -> tuple[list[str], list[str]]:
+    """Read column names and coarse semantic types from ARFF header."""
+    columns: list[str] = []
+    column_types: list[str] = []
+
+    for raw_line in _read_text_lines_best_effort(arff_path):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("%"):
+            continue
+        if stripped.lower().startswith("@data"):
+            break
+        if stripped.lower().startswith("@attribute"):
+            name, attr_type = _parse_arff_attribute_line(stripped)
+            columns.append(name)
+            column_types.append(_arff_type_to_semantic_type(attr_type))
+
+    if not columns:
+        raise ValueError(f"Could not parse any ARFF attributes from {arff_path}")
     return columns, column_types
 
 
@@ -120,6 +195,8 @@ def save_eval_progress(path: Path, done: set[str]) -> None:
 def discover_datasets(source: str) -> list[dict]:
     """Scan data/{source}/ and collect dataset metadata for evaluation."""
     source_dir = DATA_DIR / source
+    if source == "openml" and (source_dir / "arff").exists():
+        source_dir = source_dir / "arff"
     if not source_dir.exists():
         log.warning(f"Source directory not found: {source_dir}")
         return []
@@ -153,17 +230,25 @@ def discover_datasets(source: str) -> list[dict]:
 
 
 def _read_dataset_dir(ds_dir: Path, source: str, dataset_id: str) -> dict | None:
-    """Read schema from parquet and metadata from metadata.json."""
-    # Find a parquet file
-    parquet_files = list(ds_dir.glob("*.parquet"))
-    if not parquet_files:
-        return None
-
-    try:
-        columns, column_types = _read_parquet_schema(parquet_files[0])
-    except Exception as e:
-        log.warning(f"Cannot read parquet {parquet_files[0]}: {e}")
-        return None
+    """Read schema from ARFF/parquet and metadata from metadata.json."""
+    if source == "openml":
+        arff_files = list(ds_dir.glob("*.arff"))
+        if not arff_files:
+            return None
+        try:
+            columns, column_types = _read_arff_schema(arff_files[0])
+        except Exception as e:
+            log.warning(f"Cannot read ARFF {arff_files[0]}: {e}")
+            return None
+    else:
+        parquet_files = list(ds_dir.glob("*.parquet"))
+        if not parquet_files:
+            return None
+        try:
+            columns, column_types = _read_parquet_schema(parquet_files[0])
+        except Exception as e:
+            log.warning(f"Cannot read parquet {parquet_files[0]}: {e}")
+            return None
 
     # Read metadata from metadata.json
     dataset_name = dataset_id
